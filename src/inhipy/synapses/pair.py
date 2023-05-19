@@ -7,8 +7,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 from tqdm import tqdm
 
-import sys
-import platform
+from inhipy.utils.config import initialize_step_run, get_basedir
 
 
 # from synspy> analyze > pair :
@@ -105,17 +104,14 @@ def pair_centroids(centroids1, centroids2, radius_seq):
 #     plt.xlabel('Deforestation radius, um')
 #     plt.ylabel('Synapses paired, %')
 
-
-def run_euclidean_distance(pairing_config, output_folder, verbose=True):
+def get_synapse_centroids(centroids_config):
     """
     """
-    
     for tp in ['tp1', 'tp2']:
         # get files with synapse centroids
-        basedir = Path(pairing_config['synapse_centroids'][tp]['basedir'])
-        step = pairing_config['synapse_centroids'][tp]['step']
-        name = pairing_config['synapse_centroids'][tp]['name']
-        file = basedir / step / name / pairing_config['synapse_centroids'][tp]['file']
+        basedir = get_basedir(centroids_config[tp]['basedir'])
+        file = basedir / centroids_config[tp]['file']
+
         # read tp1 and tp2 csvs into dataframes
         if tp == 'tp1':
             tp1_df = pd.read_csv(file)
@@ -131,12 +127,19 @@ def run_euclidean_distance(pairing_config, output_folder, verbose=True):
     centroids2 = tp2_df[['z','y','x']].copy()
 
     for tp in ['tp1', 'tp2']:
-        if 'spacing' in pairing_config['synapse_centroids'][tp]:
-            spacing = {key:value for key, value in zip('xyz',pairing_config['synapse_centroids'][tp]['spacing'])}
+        if 'spacing' in centroids_config[tp]:
+            spacing = {key:value for key, value in zip('xyz',centroids_config[tp]['spacing'])}
             if tp == 'tp1':
                 centroids1[['z','y','x']] = centroids1[['z','y','x']].multiply(spacing)
             elif tp == 'tp2':
                 centroids2[['z','y','x']] = centroids2[['z','y','x']].multiply(spacing)
+    return centroids1, centroids2, tp1_df, tp2_df
+
+def run_euclidean_distance(pairing_config, verbose=True):
+    """
+    """
+    # load input data
+    centroids1, centroids2, tp1_df, tp2_df = get_synapse_centroids(pairing_config['input']['synapse_centroids'])
 
     # process for each distance threshold
     distances = pairing_config['parameters']['distance_thr']['d']
@@ -184,17 +187,18 @@ def run_euclidean_distance(pairing_config, output_folder, verbose=True):
         gained['prob'] = tp2_df['prob'][is_gained].values
 
         # save the dataframes
-        paired_file = output_folder / pairing_config['output']['paired_files'].format(EDT=d)
-        paired.to_csv(paired_file, index=False)
+        output_folder = Path(pairing_config['output_folder'])
+        paired_file = pairing_config['output']['files']['paired'].format(EDT=d)
+        paired.to_csv(output_folder / paired_file, index=False)
 
-        lost_file = output_folder / pairing_config['output']['lost_files'].format(EDT=d)
-        lost.to_csv(lost_file, index=False)
+        lost_file = pairing_config['output']['files']['lost'].format(EDT=d)
+        lost.to_csv(output_folder / lost_file, index=False)
 
-        gained_file = output_folder / pairing_config['output']['gained_files'].format(EDT=d)
-        gained.to_csv(gained_file, index=False)
+        gained_file = pairing_config['output']['files']['gained'].format(EDT=d)
+        gained.to_csv(output_folder / gained_file, index=False)
 
         if verbose:
-            print(f"Saved pairing for to \n{paired_file}\n{lost_file}\n{gained_file}")
+            print(f"Saved pairing for to \n{output_folder}:\n{paired_file}\n{lost_file}\n{gained_file}")
             print("First 5 rows:")
             print('paired')
             print(paired.head())
@@ -205,27 +209,16 @@ def run_euclidean_distance(pairing_config, output_folder, verbose=True):
 
 
 def run_pairing(config, verbose = True):
-
-    # prepare the output directory
-    step = config.get('step', 'synapse_pairing')
-    name = config.get('name', generate_slug(2)) # generate random name if not provided
-    output_folder = Path(config['output']['basedir']) / step / name
-    output_folder.mkdir(parents=True, exist_ok=True)
-    
-    # add the name to the config if it was generated 
-    if 'name' not in config:
-        config['name'] = name
-    # save config to the folder 
-    with open(output_folder/f"{name}_config.yaml", 'w') as f:
-        yaml.dump(config, f)
+    step = 'synapse_pairing'
+    config = initialize_step_run(config, step, verbose = verbose)
 
     # run the classification
-    method = config['parameters']['method']
+    method = config['method']
     if method == 'euclidean_distance':
         run_method = run_euclidean_distance
     else:
         raise ValueError('Unknown synapse pairing method: {}'.format(method))
     
-    run_method(config, output_folder, verbose=verbose)
+    run_method(config, verbose=verbose)
 
 
